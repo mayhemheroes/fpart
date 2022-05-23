@@ -1,0 +1,8 @@
+project: rnshah9/fpart
+target: fpart
+tests: null
+
+cmds:
+  - cmd: /repo/src/fpart -s 3 @@
+  - cmd: /repo/src/fpart -n 3 @@
+  - cmd: /repo/src/fpart -n 5 -i -
