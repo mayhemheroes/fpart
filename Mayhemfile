@@ -2,4 +2,4 @@ project: fpart
 target: fpart
 
 cmds:
-  - cmd: /repo/src/fpart -n 5 -i -
+  - cmd: /install/bin/fpart -n 5 -i -
