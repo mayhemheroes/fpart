@@ -3,17 +3,12 @@ FROM --platform=linux/amd64 ubuntu:20.04 as builder
 RUN apt-get update
 RUN DEBIAN_FRONTEND=noninteractive apt-get install -y automake pkg-config libtool build-essential
 
-ADD . /repo
+COPY . /repo
 WORKDIR /repo
 RUN autoreconf -if
-RUN ./configure
+RUN ./configure --prefix=/install
 RUN make -j8
-
-RUN mkdir -p /deps
-RUN ldd /repo/src/fpart | tr -s '[:blank:]' '\n' | grep '^/' | xargs -I % sh -c 'cp % /deps;'
+RUN make install
 
 FROM ubuntu:20.04 as package
-
-COPY --from=builder /deps /deps
-COPY --from=builder /repo/src/fpart /repo/src/fpart
-ENV LD_LIBRARY_PATH=/deps
+COPY --from=builder /install /install
