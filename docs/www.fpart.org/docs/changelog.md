@@ -1,6 +1,14 @@
-# Next: 1.4.1
+# Current: 1.5.1
 ```nohighlight
-    2022/??/??, 1.4.1 ('???') :
+    2022/06/22, 1.5.1 ('Feel the light') :
+    - fpsync: add source, destination and total elapsed time to the email
+      report (GH PR #41)
+    - fpsync: add option -T to specify absolute path of copy tool (GH PR #42)
+    - fpsync: output cleanups
+```
+# 1.5.0
+```nohighlight
+    2022/06/02, 1.5.0 ('Rebirth') :
     - added 'make_release.sh' script to automate release tarball creation
     - embedded fts: check errors from readdir() (GH issue #37)
     - fpart: re-enable large files support on GNU/Linux
@@ -34,7 +42,7 @@
     - fpsync: rework child processes and SIGINT handling and fix missing display
       of last jobs' completion status (inspired by GH PR #40)
 ```
-# Current: 1.4.0
+# 1.4.0
 ```nohighlight
     2021/09/24, 1.4.0 ('Joining together') :
     - fpsync: allow special characters and white spaces within fpart options

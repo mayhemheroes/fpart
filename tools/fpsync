@@ -28,12 +28,14 @@
 # It uses fpart and a copy tool to spawn multiple instances to migrate data from
 # src_dir/ to dst_url/. Jobs can execute either locally or over SSH.
 
-FPSYNC_VERSION="1.4.1"
+FPSYNC_VERSION="1.5.1"
 
 ########## Default values for options
 
 # External tool used to copy files
 OPT_TOOL_NAME="rsync"
+# External tool path
+OPT_TOOL_PATH=""
 # Number of sync jobs to run in parallel ("workers", -n)
 OPT_JOBS=2
 # Same, but autodetected
@@ -114,6 +116,7 @@ COMMON OPTIONS:
 SYNCHRONIZATION OPTIONS:
   -m tool     external copy tool to use: $(tool_print_supported)
               (default: 'rsync')
+  -T path     absolute path of copy tool (default: guessed)
   -f y        transfer at most <y> files or directories per sync job
   -s z        transfer at most <z> bytes per sync job
   -E          work on a per-directory basis ('rsync' tool only)
@@ -142,7 +145,7 @@ RUN HANDLING OPTIONS:
               synchronization jobs.
   -l          list previous runs and their status.
   -r runid    resume run <runid>
-              (options -m, -f, -s, -E, -o, -O, -S, /src_dir/ and
+              (options -m, -T, -f, -s, -E, -o, -O, -S, /src_dir/ and
               /dst_url/ are ignored when resuming a previous run)
   -R          replay mode (needs option -r): re-synchronize all
               partitions from run <runid> instead of working on
@@ -170,11 +173,11 @@ end_die () {
 # $1 = level (0 = quiet, 1 = verbose, >=2 more verbose)
 # $2 = message to log
 echo_log () {
-    local _ts=$(date '+%s')
+    local _log_ts=$(date '+%s')
     is_num "$1" && [ ${OPT_VERBOSE} -ge $1 ] && [ -n "$2" ] && \
-        echo "${_ts} $2"
+        echo "${_log_ts} $2"
     [ -n "$2" ] && \
-        echo "${_ts} $2" >> "${FPART_LOGFILE}"
+        echo "${_log_ts} $2" >> "${FPART_LOGFILE}"
 }
 
 # Check if $1 is an absolute path
@@ -450,7 +453,7 @@ tool_uses_forbidden_option () {
 parse_opts () {
     local opt OPTARG OPTIND
 
-    while getopts "m:n:f:s:Ew:d:t:M:plr:Ra:D:o:O:Svh" opt
+    while getopts "m:T:n:f:s:Ew:d:t:M:plr:Ra:D:o:O:Svh" opt
     do
         case "${opt}" in
         "m")
@@ -459,6 +462,14 @@ parse_opts () {
                 OPT_TOOL_NAME=${OPTARG}
             else
                 end_die "Unsupported tool, please specify $(tool_print_supported)"
+            fi
+            ;;
+        "T")
+            if is_abs_path "${OPTARG}"
+            then
+                OPT_TOOL_PATH="${OPTARG}"
+            else
+                end_die "Please supply an absolute path for tool path"
             fi
             ;;
         "n")
@@ -765,14 +776,20 @@ job_queue_info_dump () {
     touch "${JOBS_QUEUEDIR}/info" 2>/dev/null
     umask "${_TMPMASK}"
 
-    # Dump necessary information for resuming a run
+    # Dump necessary information to resume a run
+    # XXX OPT_TOOL_NAME and OPT_TOOL_PATH are technically ignored when resuming
+    # because fpart pass has finished and job scripts have already been written.
+    # Anyway, we record them for 2 reasons:
+    #   - to display them to the user
+    #   - to check if OPT_TOOL_PATH exists on all workers
     cat << EOF > "${JOBS_QUEUEDIR}/info" || \
         end_die "Cannot record run information"
 # Run information used for resuming, do not edit !
 OPT_RJOBS="${OPT_JOBS}"
-OPT_TOOL_NAME="${OPT_TOOL_NAME}"
 OPT_SRCDIR="${OPT_SRCDIR}"
 OPT_DSTURL="${OPT_DSTURL}"
+OPT_TOOL_NAME="${OPT_TOOL_NAME}"
+OPT_TOOL_PATH="${OPT_TOOL_PATH}"
 EOF
 }
 
@@ -787,6 +804,10 @@ job_queue_info_load () {
 
     ! tool_is_supported "${OPT_TOOL_NAME}" && \
         end_die "Invalid option value loaded from resumed run: OPT_TOOL_NAME"
+
+    ! is_abs_path "${OPT_TOOL_PATH}" && \
+        end_die "Invalid option value loaded from resumed run: OPT_TOOL_PATH"
+    TOOL_BIN="${OPT_TOOL_PATH}"
 
     is_abs_path "${OPT_SRCDIR}" || \
         end_die "Invalid options value loaded from resumed run: OPT_SRCDIR"
@@ -850,8 +871,8 @@ siginfo_handler () {
         _jobs_percent="$(( (${_jobs_done} * 100) / ${_jobs_total} ))"
 
     # Time counters, relative to the current run (resume-aware)
-    local _ts=$(date '+%s')
-    local _run_elapsed_time="$(( ${_ts} - ${_run_start_time} ))"
+    local _siginfo_ts=$(date '+%s')
+    local _run_elapsed_time="$(( ${_siginfo_ts} - ${_run_start_time} ))"
     local _run_jobs_done="$(( ${_jobs_done} - ${_run_start_jobs} ))"
 
     local _run_time_per_job="??"
@@ -862,8 +883,8 @@ siginfo_handler () {
         _run_time_remaining="$(( (${_run_elapsed_time} * ${_jobs_remaining}) / ${_run_jobs_done} ))"
     fi
 
-    echo "${_ts} <===   Parts done: ${_jobs_done}/${_jobs_total} (${_jobs_percent}%), remaining: ${_jobs_remaining}"
-    echo "${_ts} <=== Time elapsed: ${_run_elapsed_time}s, remaining: ~${_run_time_remaining}s (~${_run_time_per_job}s/job)"
+    echo "${_siginfo_ts} <=== Parts done: ${_jobs_done}/${_jobs_total} (${_jobs_percent}%), remaining: ${_jobs_remaining}"
+    echo "${_siginfo_ts} <=== Time elapsed: ${_run_elapsed_time}s, remaining: ~${_run_time_remaining}s (~${_run_time_per_job}s/job)"
 }
 
 # Get next job name relative to ${JOBS_WORKDIR}/
@@ -874,17 +895,17 @@ siginfo_handler () {
 # 'sl_stop': the 'immediate stop' flag, set when ^C is hit
 # 'fp_done': set when fpart has finished crawling src_dir/ and generated jobs
 job_queue_next () {
-    local _NEXT=""
+    local _next=""
     if [ -f "${JOBS_QUEUEDIR}/sl_stop" ]
     then
         echo "sl_stop"
     else
-        _NEXT=$(cd "${JOBS_QUEUEDIR}" && ls -rt1 2>/dev/null | grep -v 'info' 2>/dev/null | head -n 1)
-        if [ -n "${_NEXT}" ]
+        _next=$(cd "${JOBS_QUEUEDIR}" && ls -rt1 2>/dev/null | grep -v 'info' 2>/dev/null | head -n 1)
+        if [ -n "${_next}" ]
         then
-            mv "${JOBS_QUEUEDIR}/${_NEXT}" "${JOBS_WORKDIR}" || \
+            mv "${JOBS_QUEUEDIR}/${_next}" "${JOBS_WORKDIR}" || \
                 end_die "Cannot dequeue next job"
-            echo "${_NEXT}"
+            echo "${_next}"
         fi
     fi
 }
@@ -927,11 +948,21 @@ SUDO=""
 # Paths to executables that must exist either locally or remotely (depending
 # on if you use SSH or not). When using SSH, the following binaries must be
 # present at those paths on each worker.
-if [ "${OPT_TOOL_NAME}" = "tarify" ]
+#
+# XXX OPT_TOOL_NAME, OPT_TOOL_PATH and TOOL_BIN may be overridden
+# later when resuming a run, see job_queue_info_dump() and job_queue_info_load()
+if [ -n "${OPT_TOOL_PATH}" ]
 then
-    TOOL_BIN=$(command -v "tar")
+    # Use the path to the tool if provided on the command line
+    TOOL_BIN="${OPT_TOOL_PATH}"
 else
-    TOOL_BIN=$(command -v "${OPT_TOOL_NAME}")
+    # Provide defaults regarding tool name
+    if [ "${OPT_TOOL_NAME}" = "tarify" ]
+    then
+        TOOL_BIN=$(command -v "tar")
+    else
+        TOOL_BIN=$(command -v "${OPT_TOOL_NAME}")
+    fi
 fi
 
 ## Simple run-related -independent- actions, not requiring FPART_RUNID
@@ -1010,6 +1041,7 @@ FPART_LOGFILE="${FPART_LOGDIR}/fpart.log"
 FPART_LOGFIFO="${FPART_LOGDIR}/.fpart.log.fifo"
 
 # Prepare mode-specific tool and fpart options
+# used when starting a new run (only)
 TOOL_MODEOPTS=$(tool_get_tool_mode_opts "${OPT_TOOL_NAME}" "${OPT_DIRSONLY}")
 TOOL_MODEOPTS_R=$(tool_get_tool_mode_opts_recursive "${OPT_TOOL_NAME}")
 FPART_MODEOPTS=$(tool_get_fpart_mode_opts "${OPT_TOOL_NAME}" "${OPT_DIRSONLY}" "${OPT_AGGRESSIVE}")
@@ -1206,21 +1238,24 @@ fi
 work_list_free_workers_init
 
 # Let's rock !
-echo_log "2" "=====> [$$] Syncing ${OPT_SRCDIR} => ${OPT_DSTURL}"
-echo_log "1" "===> Run ID: ${FPART_RUNID}$([ -n "${OPT_RUNID}" ] && echo ' (resumed)')"
-echo_log "2" "===> Start time: $(date)"
-echo_log "2" "===> Concurrent sync jobs: ${OPT_JOBS}"
-echo_log "2" "===> Workers: $(echo "${OPT_WRKRS}" | sed -E -e 's/^[[:space:]]+//' -e 's/[[:space:]]+/ /g')$([ -z "${OPT_WRKRS}" ] && echo 'local')"
-echo_log "2" "===> Shared dir: ${OPT_FPSHDIR}"
-echo_log "2" "===> Temp dir: ${OPT_TMPDIR}"
-echo_log "2" "===> Tool name: \"${OPT_TOOL_NAME}\""
-# The following options are ignored when resuming
+echo_log "2" "Info: [$$] Syncing ${OPT_SRCDIR} => ${OPT_DSTURL}"
+echo_log "1" "Info: Run ID: ${FPART_RUNID}$([ -n "${OPT_RUNID}" ] && echo ' (resumed)')"
+echo_log "2" "Info: Start time: $(date)"
+echo_log "2" "Info: Concurrent sync jobs: ${OPT_JOBS}"
+echo_log "2" "Info: Workers: $(echo "${OPT_WRKRS}" | sed -E -e 's/^[[:space:]]+//' -e 's/[[:space:]]+/ /g')$([ -z "${OPT_WRKRS}" ] && echo 'local')"
+echo_log "2" "Info: Shared dir: ${OPT_FPSHDIR}"
+echo_log "2" "Info: Temp dir: ${OPT_TMPDIR}"
+# The following two options are just a recall to the user
+# (they are technically ignored when resuming a run)
+echo_log "2" "Info: Tool name: \"${OPT_TOOL_NAME}\""
+echo_log "2" "Info: Tool path: \"${TOOL_BIN}\""
 if [ -z "${OPT_RUNID}" ]
 then
-    echo_log "2" "===> Tool options: \"${OPT_TOOL}\""
-    echo_log "2" "===> Fpart options: \"${OPT_FPART}\""
-    echo_log "2" "===> Max files or directories per sync job: ${OPT_FPMAXPARTFILES}"
-    echo_log "2" "===> Max bytes per sync job: ${OPT_FPMAXPARTSIZE}"
+    # The following options are useless when resuming a run
+    echo_log "2" "Info: Tool options: \"${OPT_TOOL}\""
+    echo_log "2" "Info: Fpart options: \"${OPT_FPART}\""
+    echo_log "2" "Info: Max files or directories per sync job: ${OPT_FPMAXPARTFILES}"
+    echo_log "2" "Info: Max bytes per sync job: ${OPT_FPMAXPARTSIZE}"
 fi
 
 # Record run information
@@ -1243,6 +1278,7 @@ then
     mkfifo "${FPART_LOGFIFO}" || \
         end_die "Cannot create named pipe: ${FPART_LOGFIFO}"
 
+    echo_log "2" "===> Starting Fpart"
     # Fpart process is forked in the same process group as its parent
     # (the main script) to allow SIGINT propagation and tty output
     # https://pubs.opengroup.org/onlinepubs/009604599/basedefs/xbd_chap11.html#tag_11_01_04
@@ -1275,17 +1311,17 @@ then
         if [ $? -ne 0 ]
         then
             job_queue_sl_stop
-            echo_log "1" "===> Fpart exited with errors"
+            echo_log "1" "<=== Fpart exited with errors"
         else
             # Tell job_queue_loop that crawling has finished
             job_queue_fp_done
-            echo_log "1" "===> Fpart crawling finished"
+            echo_log "1" "<=== Fpart crawling finished"
         fi
 
         # Remove FIFO (once tee exits and closes its fd)
         rm -f "${FPART_LOGFIFO}"
     ) &
-    echo_log "2" "===> Fpart started (from sub-shell pid=$!)"
+    echo_log "2" "<=== Fpart started (from sub-shell pid=$!)"
 fi
 
 # When not in prepare mode, start synchronization loop
@@ -1299,38 +1335,38 @@ then
     # Main jobs' loop: pick up jobs within the queue directory and start them
     echo_log "2" "===> [QMGR] Starting queue manager"
 
-    _NEXT=""
-    while [ "${_NEXT}" != "fp_done" ] && [ "${_NEXT}" != "sl_stop" ]
+    _next_job=""
+    while [ "${_next_job}" != "fp_done" ] && [ "${_next_job}" != "sl_stop" ]
     do
         _PID=""
         if [ ${WORK_NUM} -lt ${OPT_JOBS} ]
         then
-            _NEXT="$(job_queue_next)"
-            if [ -n "${_NEXT}" ] && \
-                [ "${_NEXT}" != "fp_done" ] && \
-                [ "${_NEXT}" != "sl_stop" ]
+            _next_job="$(job_queue_next)"
+            if [ -n "${_next_job}" ] && \
+                [ "${_next_job}" != "fp_done" ] && \
+                [ "${_next_job}" != "sl_stop" ]
             then
                 if [ -z "${OPT_WRKRS}" ]
                 then
-                    echo_log "2" "=> [QMGR] Starting job ${JOBS_WORKDIR}/${_NEXT} (local)"
+                    echo_log "2" "=> [QMGR] Starting job ${JOBS_WORKDIR}/${_next_job} (local)"
                     # We want a new process group for each sync process to
                     # prevent SIGINT propagation
                     set -m
                     (
-                        /bin/sh "${JOBS_WORKDIR}/${_NEXT}"
+                        /bin/sh "${JOBS_WORKDIR}/${_next_job}"
                     ) &
-                    work_list_push "$!:${_NEXT}:local"
+                    work_list_push "$!:${_next_job}:local"
                     set +m
                 else
-                    _NEXT_HOST="$(work_list_pick_next_free_worker)"
+                    _next_host="$(work_list_pick_next_free_worker)"
                     work_list_trunc_next_free_worker
-                    echo_log "2" "=> [QMGR] Starting job ${JOBS_WORKDIR}/${_NEXT} -> ${_NEXT_HOST}"
+                    echo_log "2" "=> [QMGR] Starting job ${JOBS_WORKDIR}/${_next_job} -> ${_next_host}"
                     set -m
                     (
-                        "${SSH_BIN}" "${_NEXT_HOST}" '/bin/sh -s' \
-                            < "${JOBS_WORKDIR}/${_NEXT}"
+                        "${SSH_BIN}" "${_next_host}" '/bin/sh -s' \
+                            < "${JOBS_WORKDIR}/${_next_job}"
                     ) &
-                    work_list_push "$!:${_NEXT}:${_NEXT_HOST}"
+                    work_list_push "$!:${_next_job}:${_next_host}"
                     set +m
                 fi
             fi
@@ -1340,7 +1376,7 @@ then
         fi
     done
 
-    if [ "${_NEXT}" = "fp_done" ]
+    if [ "${_next_job}" = "fp_done" ]
     then
         echo_log "2" "<=== [QMGR] Done submitting jobs. Waiting for them to finish."
     else
@@ -1377,13 +1413,16 @@ then
 else
     _report_subj="Fpsync run ${FPART_RUNID}"
 fi
+
+_ts_now=$(date '+%s')
+_total_run_elapsed_time="$(( ${_ts_now} - ${_run_start_time} ))"
 _report_logs=$(find "${FPART_LOGDIR}/" -name "*.stderr" ! -size 0)
-_report_body=$( { [ -z "${_report_logs}" ] && echo 'Fpsync completed without error.' ;} || \
-    { echo "Fpsync completed with errors, see logs:" && echo "${_report_logs}" ;} )
+_report_body=$( { [ -z "${_report_logs}" ] && echo "Fpsync completed without error in ${_total_run_elapsed_time}s." ;} || \
+    { echo "Fpsync completed with errors in ${_total_run_elapsed_time}s, see logs:" && echo "${_report_logs}" ;} )
 echo_log "1" "<=== ${_report_body}"
 echo_log "2" "<=== End time: $(date)"
 [ -n "${OPT_MAIL}" ] && \
-    echo "${_report_body}" | ${MAIL_BIN} -s "${_report_subj}" ${OPT_MAIL}
+    printf "Sync ${OPT_SRCDIR} => ${OPT_DSTURL}\n\n${_report_body}\n" | ${MAIL_BIN} -s "${_report_subj}" ${OPT_MAIL}
 
 [ -n "${_report_logs}" ] && end_die
 end_ok

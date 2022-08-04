@@ -21,7 +21,7 @@ echo "Checking out tag ${_release}..."
 
 echo "Copying sources to ${_target_dir}/${_release}..."
 { mkdir -p "${_target_dir}/" && \
-  cp -rf ./ "${_target_dir}/${_release}" ;} || \
+  cp -Rf ./ "${_target_dir}/${_release}" ;} || \
   end_die "Error copying sources"
 
 echo "Running autoreconf..."
@@ -46,6 +46,10 @@ echo "Created signature: ${_target_dir}/${_release}.tar.gz.asc"
 echo "Cleaning up temporary directory..."
 rm -rf "${_target_dir}/${_release}" || \
   end_die "Error cleaning up: ${_target_dir}/${_release}"
+
+echo "Coming back to master branch..."
+git checkout "master" || \
+  end_die "Could not checkout master branch"
 
 echo "done."
 exit 0
