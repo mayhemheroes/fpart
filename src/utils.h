@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2011-2022 Ganael LAPLANCHE <ganael.laplanche@martymac.org>
+ * Copyright (c) 2011-2023 Ganael LAPLANCHE <ganael.laplanche@martymac.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -72,9 +72,12 @@
         err_action                                                      \
     }
 
+/* use enclosed in curly brackets to avoid namespace clash */
 #define if_not_realloc(ptr, size, err_action)                           \
+    void *old_ptr = ptr;                                                \
     ptr = realloc(ptr, size);                                           \
     if(ptr == NULL) {                                                   \
+        ptr = old_ptr;                                                  \
         fprintf(stderr, "%s(): cannot reallocate memory\n", __func__);  \
         err_action                                                      \
     }
@@ -84,6 +87,8 @@ unsigned int get_num_digits(double i);
 fsize_t get_size(char *file_path, struct stat *file_stat,
     struct program_options *options);
 char *abs_path(const char *path);
+void cleanslash_path(char * const path);
+char * parent_path(const char * const path, const unsigned char keep_ending_slash);
 int str_push(char ***array, unsigned int *num, const char * const str);
 void str_cleanup(char ***array, unsigned int *num);
 int str_is_negative(const char * const str);

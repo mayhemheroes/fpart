@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2011-2022 Ganael LAPLANCHE <ganael.laplanche@martymac.org>
+ * Copyright (c) 2011-2023 Ganael LAPLANCHE <ganael.laplanche@martymac.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -270,6 +270,111 @@ abs_path(const char *path)
     return (abs);
 }
 
+/* In-place remove multiple ending slashes from path
+   leaving a single ending slash, if any
+   - path must point to a writeable address */
+void
+cleanslash_path(char * const path)
+{
+    assert(path != NULL);
+
+    size_t path_len = strlen(path);
+
+    while((path_len > 1) &&
+        (path[path_len - 1] == '/')  &&
+        (path[path_len - 2] == '/')) {
+        path[path_len - 1] = '\0';
+        path_len--;
+    }
+
+    return;
+}
+
+#if 0
+/* Add an ending slash to path
+   - returns a new slashed path address
+   - returned memory must be freed afterwards
+   - NULL is returned when an error occurs */
+char *
+slash_path(const char * const path)
+{
+    assert(path != NULL);
+
+    size_t path_len = strlen(path);
+    char *slashed_path = NULL;    /* will be returned */
+
+    if_not_malloc(slashed_path, path_len + 1 + 1,
+        return (NULL);
+    )
+    snprintf(slashed_path, path_len + 1 + 1, "%s/", path);
+
+    return (slashed_path);
+}
+#endif
+
+/* Allocate and return path's parent
+   - returned memory must be freed afterwards
+   - returned parent ends with zero or a single ending '/'
+   - multiple intermediate slashes are *not* removed
+   - an empty string is returned when attempting to retrieve a single-level
+     relative path's parent
+   - NULL is returned when an error occurs
+
+   Examples :
+     "/foo/bar///baz///" => "/foo/bar/"
+     "/foo///bar///baz///" => "/foo///bar/"
+     "foo/bar///baz///" => "foo/bar/"
+     "foo///" => ""
+     "///foo" => "/"
+     "foo" => ""
+     "" => ""
+*/
+char *
+parent_path(const char * const path, const unsigned char keep_ending_slash)
+{
+    assert(path != NULL);
+
+    char *parent = NULL;    /* will be returned */
+    char pe_seen = 0;       /* has a path element (any char != '/')
+                               been seen ? */
+
+    size_t path_len = strlen(path);
+
+    if_not_malloc(parent, path_len + 1,
+        return (NULL);
+    )
+    snprintf(parent, path_len + 1, "%s", path);
+
+    /* crawl the string from the end and erase last path element */
+    while(
+        /* absolute paths: allow erasing up to the initial '/' */
+        (((parent[0] == '/') && (path_len > 1)) ||
+        /* relative paths: allow erasing up to the empty string */
+            ((parent[0] != '/') && (path_len >= 1))) &&
+        /* only slashes seen yet */
+        ((pe_seen == 0) ||
+            /* current char belongs to last path element */
+            ((pe_seen == 1) &&
+                (parent[path_len - 1] != '/')) ||
+            /* we erased last path element but next char is also a slash */
+            ((pe_seen == 1) &&
+                (parent[path_len - 1] == '/') && (parent[path_len - 2] == '/')))
+    ) {
+        if(parent[path_len - 1] != '/')
+            pe_seen = 1;
+        parent[path_len - 1] = '\0';
+        path_len--;
+    }
+
+    /* remove ending slash if requested, always leaving initial '/' intact */
+    if((!keep_ending_slash) && (path_len > 1) && (parent[path_len - 1] == '/')) {
+        parent[path_len - 1] = '\0';
+        path_len--;
+    }
+
+    return (parent);
+}
+
 /* Push str into array and update num
    - allocate memory for array if NULL
    - return 0 (success) or 1 (failure) */
@@ -291,10 +396,12 @@ str_push(char ***array, unsigned int *num, const char * const str)
     snprintf(tmp_str, malloc_size, "%s", str);
 
     /* add new char *pointer to array */
-    if_not_realloc(*array, sizeof(char *) * ((*num) + 1),
-        free(tmp_str);
-        return (1);
-    )
+    {
+        if_not_realloc(*array, sizeof(char *) * ((*num) + 1),
+            free(tmp_str);
+            return (1);
+        )
+    }
     (*array)[*num] = tmp_str;
     *num += 1;
 
@@ -418,13 +525,13 @@ file_match(const char * const * const array, const unsigned int num,
             /* Current string contains a file name */
             if(fnmatch(array[i], p->fts_name, FNM_PERIOD |
                 (ignore_case ? FNM_CASEFOLD : 0)) == 0)
-                return(1);
+                return (1);
         }
         else {
             /* Current string contains a path */
             if(fnmatch(array[i], p->fts_path, FNM_PATHNAME | FNM_PERIOD |
                 (ignore_case ? FNM_CASEFOLD : 0)) == 0)
-                return(1);
+                return (1);
         }
         i++;
     }

@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2011-2022 Ganael LAPLANCHE <ganael.laplanche@martymac.org>
+ * Copyright (c) 2011-2023 Ganael LAPLANCHE <ganael.laplanche@martymac.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -65,6 +65,11 @@ struct program_options {
 #define OPT_ADDSLASH                1
 #define DFLT_OPT_ADDSLASH           OPT_NOADDSLASH
     unsigned char add_slash;
+/* add parent directories (option -P) */
+#define OPT_NOADDPARENTS            0
+#define OPT_ADDPARENTS              1
+#define DFLT_OPT_ADDPARENTS         OPT_NOADDPARENTS
+    unsigned char add_parents;
 /* verbose output (option -v) */
 #define OPT_NOVERBOSE               0
 #define OPT_VERBOSE                 1

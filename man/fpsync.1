@@ -1,4 +1,4 @@
-.\" Copyright (c) 2015-2022 Ganael LAPLANCHE <ganael.laplanche@martymac.org>
+.\" Copyright (c) 2015-2023 Ganael LAPLANCHE <ganael.laplanche@martymac.org>
 .\" All rights reserved.
 .\"
 .\" Redistribution and use in source and binary forms, with or without
@@ -440,6 +440,13 @@ This is important to keep in mind when modifying
 or
 .Ar fpartopts
 dealing with file or directory paths.
+.sp
+If you want to run
+.Nm
+in the background, your shell must support enabling job control without a tty
+in non-interactive mode.
+As of this writing, Dash does not support that feature and will send a SIGTTIN
+to the whole process group, suspending fpsync execution.
 .Sh SEE ALSO
 .Xr cpio 1 ,
 .Xr fpart 1 ,

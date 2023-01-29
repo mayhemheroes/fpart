@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2011-2022 Ganael LAPLANCHE <ganael.laplanche@martymac.org>
+ * Copyright (c) 2011-2023 Ganael LAPLANCHE <ganael.laplanche@martymac.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -65,7 +65,7 @@ static void
 version(void)
 {
     fprintf(stderr, "fpart v" FPART_VERSION "\n"
-        "Copyright (c) 2011-2022 "
+        "Copyright (c) 2011-2023 "
         "Ganael LAPLANCHE <ganael.laplanche@martymac.org>\n"
         "WWW: http://contribs.martymac.org\n");
     fprintf(stderr, "Build options: debug=");
@@ -110,6 +110,8 @@ usage(void)
     fprintf(stderr, "  -0\tend filenames with a null (\\0) character when "
         "using option -o\n");
     fprintf(stderr, "  -e\tadd ending slash to directories\n");
+    fprintf(stderr, "  -P\tadd parent directories when closing intermediate "
+        "partitions (needs -L)\n");
     fprintf(stderr, "  -v\tverbose mode (may be specified more than once to "
         "increase verbosity)\n");
     fprintf(stderr, "\n");
@@ -213,14 +215,9 @@ handle_argument(char *argument, fnum_t *totalfiles, struct file_entry **head,
             return (1);
         )
         snprintf(input_path, malloc_size, "%s", argument);
-    
+
         /* remove multiple ending slashes */
-        while((input_path_len > 1) &&
-            (input_path[input_path_len - 1] == '/')  &&
-            (input_path[input_path_len - 2] == '/')) {
-            input_path[input_path_len - 1] = '\0';
-            input_path_len--;
-        }
+        cleanslash_path(input_path);
 
         /* crawl path */
         if(input_path[0] != '\0') {
@@ -268,9 +265,9 @@ handle_options(struct program_options *options, int *argcp, char ***argvp)
     int ch;
     while((ch = getopt(*argcp, *argvp,
 #if defined(_HAS_FNM_CASEFOLD)
-        "hVn:f:s:i:ao:0evlby:Y:x:X:zZd:DELSw:W:p:q:r:"
+        "hVn:f:s:i:ao:0ePvlby:Y:x:X:zZd:DELSw:W:p:q:r:"
 #else
-        "hVn:f:s:i:ao:0evlby:x:zZd:DELSw:W:p:q:r:"
+        "hVn:f:s:i:ao:0ePvlby:x:zZd:DELSw:W:p:q:r:"
 #endif
         )) != -1) {
         switch(ch) {
@@ -359,6 +356,9 @@ handle_options(struct program_options *options, int *argcp, char ***argvp)
                 break;
             case 'e':
                 options->add_slash = OPT_ADDSLASH;
+                break;
+            case 'P':
+                options->add_parents = OPT_ADDPARENTS;
                 break;
             case 'v':
                 options->verbose++;
@@ -545,6 +545,14 @@ handle_options(struct program_options *options, int *argcp, char ***argvp)
         options->out_filename == NULL) {
         fprintf(stderr,
             "Option -0 is valid only when used with option -o.\n");
+        return (FPART_OPTS_USAGE | FPART_OPTS_NOK | FPART_OPTS_EXIT);
+    }
+
+    /* option -P (needs '-L') */
+    if((options->add_parents == OPT_ADDPARENTS) &&
+        (options->live_mode == OPT_NOLIVEMODE)) {
+        fprintf(stderr,
+            "Option -P can only be used with options -L.\n");
         return (FPART_OPTS_USAGE | FPART_OPTS_NOK | FPART_OPTS_EXIT);
     }
 

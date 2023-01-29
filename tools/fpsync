@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Copyright (c) 2014-2022 Ganael LAPLANCHE <ganael.laplanche@martymac.org>
+# Copyright (c) 2014-2023 Ganael LAPLANCHE <ganael.laplanche@martymac.org>
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -28,7 +28,7 @@
 # It uses fpart and a copy tool to spawn multiple instances to migrate data from
 # src_dir/ to dst_url/. Jobs can execute either locally or over SSH.
 
-FPSYNC_VERSION="1.5.1"
+FPSYNC_VERSION="1.5.2"
 
 ########## Default values for options
 
@@ -94,7 +94,7 @@ LC_ALL=C
 usage () {
     cat << EOF
 fpsync v${FPSYNC_VERSION} - Sync directories in parallel using fpart
-Copyright (c) 2014-2022 Ganael LAPLANCHE <ganael.laplanche@martymac.org>
+Copyright (c) 2014-2023 Ganael LAPLANCHE <ganael.laplanche@martymac.org>
 WWW: http://contribs.martymac.org
 Usage: $0 [-p] [OPTIONS...] src_dir/ dst_url/
        $0 -l
@@ -225,6 +225,13 @@ tool_is_supported () {
     echo "$1" | grep -qE '^(rsync|cpio|tar|tarify)$'
 }
 
+# Chek if TAR_BIN is GNU tar
+# TAR_BIN must be initialized
+tar_is_GNU_tar () {
+    [ -n "${TAR_BIN}" ] &&
+        "${TAR_BIN}" --version 2>/dev/null | head -n 1 | grep -q 'GNU tar'
+}
+
 # Print supported tools in a friendly manner
 tool_print_supported () {
     echo "'rsync', 'cpio', 'tar' or 'tarify'"
@@ -258,6 +265,7 @@ tool_get_base_opts () {
 }
 
 # Get mode-specific complementary tool-related options
+# (main call or left part of a pipeline)
 # $1 = tool name
 # $2 = dirs only mode (if string not empty)
 tool_get_tool_mode_opts () {
@@ -274,7 +282,6 @@ tool_get_tool_mode_opts () {
             printf '%s\n' '-pdm'
             ;;
         "tar"|"tarify")
-            # Update directories themselves but do not recurse
             printf '%s\n' '--no-recursion'
             ;;
         *)
@@ -290,6 +297,29 @@ tool_get_tool_mode_opts () {
             # over -d (in fact, aggressive mode *depends* on having option -r
             # overriding -d)
             printf '%s\n' '-d --relative --delete --delete-after'
+            ;;
+        *)
+            ;;
+        esac
+    fi
+}
+
+# Get mode-specific complementary tool-related options
+# (right part of a pipeline), if any)
+# $1 = tool name
+# $2 = dirs only mode (if string not empty)
+tool_get_tool_mode_opts_2 () {
+    if [ -z "$2" ]
+    then
+        # File-based mode: recursion is usually disabled here
+        # as we are working with leaf elements only
+        case "$1" in
+        "tar")
+            # GNU Tar needs --delay-directory-restore during extraction.
+            if tar_is_GNU_tar
+            then
+                printf '%s\n' '--delay-directory-restore'
+            fi
             ;;
         *)
             ;;
@@ -318,8 +348,9 @@ tool_get_fpart_mode_opts () {
             ;;
         "cpio"|"tar"|"tarify")
             # We want empty directory entries with those tools
+            # and fix parent dirs' timestamps with option -P
             # to re-apply correct metadata
-            printf '%s\n' '-zzz'
+            printf '%s\n' '-zzzP'
             ;;
         *)
             ;;
@@ -414,7 +445,7 @@ tool_init_fpart_job_command () {
             ${OPT_TOOL} -C \\\"${OPT_SRCDIR}/\\\" ${TOOL_MODEOPTS} \
             --null -T \\\"\${FPART_PARTFILENAME}\\\" | \
             ${SUDO} ${TOOL_BIN} xpf - \
-            ${OPT_TOOL} -C \\\"${OPT_DSTURL}/\\\"' \
+            ${OPT_TOOL} -C \\\"${OPT_DSTURL}/\\\" ${TOOL_MODEOPTS_2}' \
             1>\"${FPART_LOGDIR}/\${FPART_PARTNUMBER}.stdout\" \
             2>\"${FPART_LOGDIR}/\${FPART_PARTNUMBER}.stderr\""
         ;;
@@ -963,6 +994,8 @@ else
     else
         TOOL_BIN=$(command -v "${OPT_TOOL_NAME}")
     fi
+    # Set this for job_queue_info_dump and job_queue_info_load to work correctly
+    OPT_TOOL_PATH="${TOOL_BIN}"
 fi
 
 ## Simple run-related -independent- actions, not requiring FPART_RUNID
@@ -1043,6 +1076,7 @@ FPART_LOGFIFO="${FPART_LOGDIR}/.fpart.log.fifo"
 # Prepare mode-specific tool and fpart options
 # used when starting a new run (only)
 TOOL_MODEOPTS=$(tool_get_tool_mode_opts "${OPT_TOOL_NAME}" "${OPT_DIRSONLY}")
+TOOL_MODEOPTS_2=$(tool_get_tool_mode_opts_2 "${OPT_TOOL_NAME}" "${OPT_DIRSONLY}")
 TOOL_MODEOPTS_R=$(tool_get_tool_mode_opts_recursive "${OPT_TOOL_NAME}")
 FPART_MODEOPTS=$(tool_get_fpart_mode_opts "${OPT_TOOL_NAME}" "${OPT_DIRSONLY}" "${OPT_AGGRESSIVE}")
 FPART_JOBCOMMAND= ; tool_init_fpart_job_command "${OPT_TOOL_NAME}" "${OPT_AGGRESSIVE}"
