@@ -1,5 +1,0 @@
-project: fpart
-target: fpart
-
-cmds:
-  - cmd: /install/bin/fpart -n 5 -i -
