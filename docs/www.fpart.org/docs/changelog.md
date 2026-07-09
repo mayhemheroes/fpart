@@ -1,6 +1,6 @@
-# Next: 1.7.1
+# Current: 1.7.1
 ```nohighlight
-    2026/??/??, 1.7.1 ('Crocodile's rap') :
+    2026/07/09, 1.7.1 ('Crocodile's rap') :
     - fpart: update embedded fts(3) using FreeBSD 15-CURRENT's version
     - fpart: fix various errors spotted by Claude (Anthropic)
     - fpsync: give more time for .ret file to be created
@@ -13,7 +13,7 @@
       timestamps (see GH issue #79)
     - fpsync: pretty-print sizes in a human-readable form
 ```
-# Current: 1.7.0
+# 1.7.0
 ```nohighlight
     2025/01/25, 1.7.0 ('About skiing and high school') :
     - fpsync: check for common commands/tools presence
