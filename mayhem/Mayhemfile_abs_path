@@ -1,0 +1,6 @@
+project: fpart
+target: abs-path
+
+cmds:
+  - cmd: /mayhem/fuzz_abs_path
+    libfuzzer: true

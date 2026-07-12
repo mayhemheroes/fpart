@@ -1,0 +1,6 @@
+project: fpart
+target: fpart
+
+cmds:
+  - cmd: /mayhem/fuzz_fpart
+    libfuzzer: true
